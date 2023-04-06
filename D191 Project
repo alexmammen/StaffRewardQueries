@@ -1,0 +1,131 @@
+--Draft of Business Problem: 
+--basically we want to be able to see how many movies that each store staff is renting out as we want to start giving commission bonuses to high
+--achieving staff members who are pushing a lot of rentals out the door.
+
+--Sources used https://www.postgresqltutorial.com/, https://www.w3schools.com/sql/, https://www.programiz.com/sql, https://www.javatpoint.com/postgresql-functions
+
+
+-- This line drops the table "detailed" if it already exists
+DROP TABLE IF EXISTS detailed;
+-- This line creates the table "detailed" with the specified columns and data types
+CREATE TABLE detailed (
+    staffID INTEGER,
+    first_name VARCHAR(45),
+    last_name VARCHAR(45),
+    email VARCHAR(45),
+    rentalID INTEGER
+);
+
+--Loaded data from staff and rental tables into the detailed table
+-- This SQL code creates a table called "summary"
+DROP TABLE IF EXISTS summary;
+CREATE TABLE summary (
+    staff_name VARCHAR(90),
+    email VARCHAR(45),
+    rental_count INTEGER
+);
+--Created summary table of including the staff member and the count of total rentals
+-- This line inserts the selected data into the "detailed" table
+INSERT INTO detailed (staffID, first_name, last_name, email, rentalID)
+-- This line selects data from the "staff" and "rental" tables and joins them on the "staff_ID" column
+SELECT 
+    s.staff_id, 
+    s.first_name, 
+    s.last_name, 
+    s.email, 
+    r.rental_id
+FROM 
+    rental r
+INNER JOIN 
+    staff s 
+ON 
+    s.staff_id = r.staff_id;
+
+--Utilize a function that will load data into the summary table
+CREATE FUNCTION summaryUpdate()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    -- Delete all existing data from the "summary" table
+    DELETE FROM summary;
+    
+    -- Insert new data into the "summary" table
+    INSERT INTO summary (staff_name, email, rental_count)
+    SELECT 
+        concat_ws(',', d.last_name, d.first_name) AS staff_name,
+        d.email,
+        COUNT(d.rentalid) AS rental_count
+    FROM 
+        detailed d
+    GROUP BY 
+        staff_name, d.email
+    ORDER BY 
+        rental_count DESC;
+    
+    -- Update the rental count for each staff member in the "summary" table
+    UPDATE summary s
+    SET rental_count = (
+        SELECT COUNT(*) 
+        FROM detailed d 
+        WHERE 
+            concat_ws(',', d.last_name, d.first_name) = s.staff_name 
+            AND d.email = s.email
+    );
+    
+    RETURN NEW;
+END;
+$$;
+
+-- Create a trigger to update the summary table automatically when data is inserted into the detailed table.
+-- This line creates the trigger "summary_table_data"
+CREATE TRIGGER summary_table_data
+AFTER INSERT ON detailed
+-- This line specifies that the trigger is fired for each statement
+FOR EACH STATEMENT
+-- This block of code is executed when the trigger is fired
+EXECUTE FUNCTION summaryUpdate();
+
+
+-- Create a stored procedure to update both the detailed and summary tables.
+CREATE PROCEDURE table_update()
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  -- Delete existing data from the detailed table.
+  DELETE FROM detailed;
+  
+  -- Insert new data into the detailed table.
+  INSERT INTO detailed (staffID, first_name, last_name, email, rentalID)
+  SELECT
+      s.staff_id, 
+      s.first_name, 
+      s.last_name, 
+      s.email, 
+      r.rental_id
+  FROM rental AS r
+  INNER JOIN staff AS s ON s.staff_id = r.staff_id;
+  
+  -- Update the summary table based on the new data in the detailed table.
+  UPDATE summary
+  SET rental_count = (SELECT COUNT(*) FROM detailed)
+  WHERE staff_name IN (
+    SELECT 
+        concat_ws(',', d.last_name, d.first_name) AS staff_name
+    FROM 
+        detailed d
+    GROUP BY 
+        staff_name
+  );
+END;
+$$;
+
+-- Call the stored procedure to update both tables automatically.
+CALL table_update();
+
+-- Select all data from the detailed table.
+SELECT * FROM detailed;
+
+-- Select all data from the summary table.
+SELECT * FROM summary;
+
